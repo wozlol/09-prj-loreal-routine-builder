@@ -1,9 +1,19 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>L'Oréal | Smart Routine &amp; Product Advisor</title>
+    <title>L'Oréal Routine Builder</title>
+    <meta
+      name="description"
+      content="Pick L'Oréal products and get a personalized routine from an AI beauty advisor."
+    />
+
+    <!-- Favicon -->
+    <link rel="icon" href="img/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="img/favicon-32.png" />
+    <link rel="apple-touch-icon" href="img/apple-touch-icon.png" />
+
     <link
       href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;500;700&display=swap"
       rel="stylesheet"
@@ -20,15 +30,37 @@
       <!------- Header / Branding ------->
       <header class="site-header">
         <img src="img/loreal-logo.png" alt="L'Oréal Logo" class="logo" />
-        <h1 class="site-title">Smart Routine &amp; Product Advisor</h1>
+        <h1 class="site-title">Routine Builder</h1>
+        <p class="site-tagline">
+          Pick the products you like and get a routine made for you.
+        </p>
+        <!-- Switches the whole layout between left-to-right and right-to-left -->
+        <button
+          type="button"
+          id="dirToggle"
+          class="dir-toggle"
+          aria-pressed="false"
+        >
+          <i class="fa-solid fa-language"></i>
+          <span id="dirToggleText">RTL</span>
+        </button>
       </header>
 
-      <!-- Category Filter -->
+      <!------- Search + Category Filter ------->
       <div class="search-section">
+        <label for="productSearch" class="visually-hidden">Search products</label>
+        <input
+          id="productSearch"
+          type="search"
+          placeholder="Search products by name or keyword"
+          autocomplete="off"
+        />
+        <label for="categoryFilter" class="visually-hidden">Category</label>
         <select id="categoryFilter">
-          <option value="" disabled selected>Choose a Category</option>
+          <option value="">All Categories</option>
           <option value="cleanser">Cleansers</option>
-          <option value="moisturizer">Moisturizers & Treatments</option>
+          <option value="moisturizer">Moisturizers &amp; Treatments</option>
+          <option value="skincare">Skincare</option>
           <option value="haircare">Haircare</option>
           <option value="makeup">Makeup</option>
           <option value="hair color">Hair Color</option>
@@ -43,18 +75,27 @@
       <div id="productsContainer" class="products-grid"></div>
 
       <!-- Selected Products -->
-      <div class="selected-products">
-        <h2>Selected Products</h2>
+      <section class="selected-products">
+        <div class="selected-header">
+          <h2>Selected Products</h2>
+          <button type="button" id="clearAll" class="clear-btn" hidden>
+            Clear all
+          </button>
+        </div>
         <div id="selectedProductsList"></div>
         <button id="generateRoutine" class="generate-btn">
           <i class="fa-solid fa-wand-magic-sparkles"></i> Generate Routine
         </button>
-      </div>
+      </section>
 
       <!------- Chat Area ------->
       <section class="chatbox">
-        <h2>Let's Build Your Routine</h2>
-        <div id="chatWindow" class="chat-window"></div>
+        <h2>About Your Routine</h2>
+        <div
+          id="chatWindow"
+          class="chat-window"
+          aria-live="polite"
+        ></div>
 
         <form id="chatForm" class="chat-form">
           <label for="userInput" class="visually-hidden">Message</label>
@@ -62,7 +103,7 @@
             id="userInput"
             name="userInput"
             type="text"
-            placeholder="Ask me about products or routines…"
+            placeholder="Ask about your routine, or about skincare, haircare, makeup…"
             autocomplete="off"
             required
           />
@@ -75,7 +116,14 @@
 
       <!------- Footer Links ------->
       <footer class="site-footer">
-        <p>&copy; 2025 L'Oréal. All rights reserved.</p>
+        <p>
+          &copy; 2026 By
+          <a href="https://woz.lol" target="_blank" rel="noopener">woz.lol</a>
+          for
+          <a href="https://www.loreal.com" target="_blank" rel="noopener"
+            >L'Oréal</a
+          >
+        </p>
         <nav>
           <!-- These URLs are placeholders -->
           <a href="#">Privacy Policy</a>
