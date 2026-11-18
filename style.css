@@ -496,6 +496,19 @@ body {
   opacity: 0;
 }
 
+.chip-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-underline-offset: 3px;
+  transition: color 0.2s;
+}
+
+.chip-link:hover {
+  color: var(--red);
+  text-decoration-color: var(--red);
+}
+
 .chip-text small {
   color: var(--grey);
   font-size: 12px;
