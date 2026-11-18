@@ -9,7 +9,7 @@ Browse L'Oréal products, select the ones you like, and generate a personalized 
 - `products.json` holds the product data. `script.js` loads it, filters it by category and search, and shows the cards.
 - Selected products are saved in the browser with localStorage, so they stay after a reload.
 - Generate Routine sends only the selected products (name, brand, category, description) and the conversation so far to a Cloudflare Worker, which adds the OpenAI API key and forwards the request. No key is in this repo.
-- Extras: product search, and a right-to-left (RTL) layout switch.
+- Extras: product search, a right-to-left (RTL) layout switch, and an installable app (PWA) with an Install App button at the bottom of the page.
 
 ## Worker
 
