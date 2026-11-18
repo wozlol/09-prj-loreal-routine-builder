@@ -9,6 +9,7 @@ const chatForm = document.getElementById("chatForm");
 const userInput = document.getElementById("userInput");
 const sendBtn = document.getElementById("sendBtn");
 const chatWindow = document.getElementById("chatWindow");
+const chatTabs = document.getElementById("chatTabs");
 const dirToggle = document.getElementById("dirToggle");
 const dirToggleText = document.getElementById("dirToggleText");
 
@@ -31,9 +32,9 @@ let allProducts = []; // every product from products.json
 let selectedIds = []; // ids of the products the user picked (saved in localStorage)
 const openDetails = new Set(); // ids whose description is currently shown
 let shownChips = new Set(); // ids already drawn in the Selected Products list
-let messages = []; // the conversation: { role, content, display? } (no system prompt)
-let waiting = false; // true while a reply is on its way
-let shownMessages = 0; // how many messages are already drawn (so only new ones animate)
+let shownMessages = 0; // how many messages of the open chat are already drawn (so only new ones animate)
+let shownChatId = null; // which chat is on screen right now
+let shownTabs = new Set(); // chat ids already drawn as tabs (so only new tabs pop in)
 
 const SELECTED_KEY = "routineSelectedIds";
 const DIR_KEY = "routineDirection";
@@ -306,15 +307,135 @@ function renderMarkdown(text) {
   return html;
 }
 
-/* Draw the whole conversation */
-function renderChat(errorText) {
+/* ---------- Saved chats (kept only in this browser, on this device) ---------- */
+
+const CHATS_KEY = "routineChats";
+const DEFAULT_TITLE = "New Chat";
+
+/* Each chat is { id, title, messages: [{ role, content, display? }] } (no system prompt) */
+let chats = [];
+let activeId = null;
+
+/* Things that only matter while the page is open, so they are not saved */
+const pending = new Set(); // chat ids still waiting for a reply
+const errors = new Map(); // chat id -> error text to show
+
+/* Load saved chats from the browser. If storage is blocked, we just start fresh */
+function loadChats() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CHATS_KEY));
+    if (saved && Array.isArray(saved.chats)) {
+      // Keep only chats with the right shape
+      chats = saved.chats.filter(
+        (c) => c && c.id && typeof c.title === "string" && Array.isArray(c.messages),
+      );
+      activeId = saved.activeId;
+    }
+  } catch (error) {
+    chats = [];
+  }
+  if (!chats.length) newChat();
+  if (!chats.some((c) => c.id === activeId)) activeId = chats[0].id;
+}
+
+/* Save all chats to the browser */
+function saveChats() {
+  try {
+    localStorage.setItem(CHATS_KEY, JSON.stringify({ chats, activeId }));
+  } catch (error) {
+    // Storage blocked or full: the chat still works, it just won't be remembered
+  }
+}
+
+/* Make a new empty chat and switch to it */
+function newChat() {
+  const chat = {
+    id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`,
+    title: DEFAULT_TITLE,
+    messages: [],
+  };
+  chats.push(chat);
+  activeId = chat.id;
+  return chat;
+}
+
+function getActiveChat() {
+  return chats.find((c) => c.id === activeId);
+}
+
+/* Short tab title */
+function makeTitle(text) {
+  return text.length > 28 ? `${text.slice(0, 28)}…` : text;
+}
+
+/* ---------- Drawing the tabs and the chat ---------- */
+
+/* Draw the row of tabs above the chat, each with a delete (×) button */
+function renderTabs() {
+  chatTabs.innerHTML = "";
+
+  for (const chat of chats) {
+    const tab = document.createElement("div");
+    const isNewTab = !shownTabs.has(chat.id);
+    tab.className = `chat-tab${chat.id === activeId ? " active" : ""}${isNewTab ? " pop" : ""}`;
+
+    const title = document.createElement("button");
+    title.type = "button";
+    title.className = "tab-title";
+    title.textContent = chat.title;
+    title.title = chat.title;
+    title.dir = "auto";
+    title.addEventListener("click", () => switchChat(chat.id));
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "tab-close";
+    close.textContent = "×";
+    close.setAttribute("aria-label", `Delete chat: ${chat.title}`);
+    close.addEventListener("click", () => {
+      // Shrink the tab first, then delete it
+      tab.classList.add("leaving");
+      setTimeout(() => deleteChat(chat.id), 160);
+    });
+
+    tab.append(title, close);
+    chatTabs.appendChild(tab);
+  }
+
+  // "+" button to start another chat
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "tab-new";
+  add.textContent = "+";
+  add.setAttribute("aria-label", "Start a new chat");
+  add.addEventListener("click", startNewChat);
+  chatTabs.appendChild(add);
+
+  shownTabs = new Set(chats.map((c) => c.id));
+
+  // Keep the active tab in view when there are many tabs
+  const activeTab = chatTabs.querySelector(".chat-tab.active");
+  if (activeTab) activeTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+/* Draw the messages of the open chat */
+function renderChat() {
+  const chat = getActiveChat();
+  const waiting = pending.has(chat.id);
+
+  // Switching to another chat redraws it without the slide-in animation
+  if (shownChatId !== chat.id) {
+    shownChatId = chat.id;
+    shownMessages = chat.messages.length;
+  }
+
   chatWindow.innerHTML = "";
   addMessage(
     "👋 Hello! Choose some products above and press Generate Routine. After that, ask me anything about your routine.",
     "ai",
   );
 
-  messages.forEach((message, index) => {
+  chat.messages.forEach((message, index) => {
     // Only messages added since the last draw slide in
     const isNew = index >= shownMessages;
     if (message.role === "user") {
@@ -325,7 +446,7 @@ function renderChat(errorText) {
       addMessage("", "ai", isNew).innerHTML = renderMarkdown(message.content);
     }
   });
-  shownMessages = messages.length;
+  shownMessages = chat.messages.length;
 
   if (waiting) {
     // Three bouncing dots while a reply is on its way
@@ -334,22 +455,73 @@ function renderChat(errorText) {
     thinking.innerHTML =
       '<span class="visually-hidden">Thinking</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   }
-  if (errorText) addMessage(errorText, "ai", true);
+  // A reply that failed (not saved to history)
+  if (errors.has(chat.id)) addMessage(errors.get(chat.id), "ai", true);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 
-  // Lock the controls only while a reply is on its way
+  // Lock the controls only while this chat is waiting for a reply
   userInput.disabled = waiting;
   sendBtn.disabled = waiting;
   generateBtn.disabled = waiting;
   generateBtn.classList.toggle("busy", waiting);
 }
 
-/* Send the whole conversation to the Worker and show the reply */
-async function askAI() {
-  waiting = true;
+function renderAll() {
+  renderTabs();
   renderChat();
+}
 
-  let errorText = "";
+/* ---------- Tab actions ---------- */
+
+function switchChat(id) {
+  if (id === activeId) return;
+  activeId = id;
+  saveChats();
+  renderAll();
+  userInput.focus();
+}
+
+/* Start a new chat, unless the current one is already empty */
+function startNewChat() {
+  const current = getActiveChat();
+  if (!current.messages.length) {
+    userInput.focus();
+    return;
+  }
+  newChat();
+  saveChats();
+  renderAll();
+  userInput.focus();
+}
+
+/* Delete one chat for good. If it was the last one, start a fresh chat */
+function deleteChat(id) {
+  const index = chats.findIndex((c) => c.id === id);
+  if (index === -1) return;
+
+  chats.splice(index, 1);
+  pending.delete(id);
+  errors.delete(id);
+
+  if (!chats.length) {
+    newChat();
+  } else if (id === activeId) {
+    // Move to the neighbor tab
+    activeId = chats[Math.min(index, chats.length - 1)].id;
+  }
+  saveChats();
+  renderAll();
+}
+
+/* ---------- Asking the AI ---------- */
+
+/* Send one chat's whole conversation to the Worker and show the reply */
+async function askAI(chat) {
+  errors.delete(chat.id);
+  pending.add(chat.id);
+  saveChats();
+  renderAll();
+
   try {
     // OpenAI has no memory, so every request carries the full history.
     // We send only role and content (the "display" text is just for the screen).
@@ -359,7 +531,7 @@ async function askAI() {
       body: JSON.stringify({
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          ...messages.map(({ role, content }) => ({ role, content })),
+          ...chat.messages.map(({ role, content }) => ({ role, content })),
         ],
       }),
     });
@@ -367,28 +539,37 @@ async function askAI() {
 
     // The reply text lives here in the OpenAI response
     const reply = data.choices[0].message.content;
-    messages.push({ role: "assistant", content: reply });
+    chat.messages.push({ role: "assistant", content: reply });
   } catch (error) {
     // Network or response problem: show a message, keep the question in history
     console.error(error);
-    errorText = "Sorry, I couldn't reach the advisor just now. Please try again.";
+    errors.set(
+      chat.id,
+      "Sorry, I couldn't reach the advisor just now. Please try again.",
+    );
   }
 
-  waiting = false;
-  renderChat(errorText);
-  userInput.focus();
+  pending.delete(chat.id);
+
+  // If this chat was deleted while we waited, there is nothing to update
+  if (!chats.includes(chat)) return;
+  saveChats();
+  renderAll();
+  if (chat.id === activeId) userInput.focus();
 }
 
 /* Generate Routine: send only the selected products to the AI */
 generateBtn.addEventListener("click", () => {
-  if (waiting) return;
+  const chat = getActiveChat();
+  if (pending.has(chat.id)) return;
 
   const selectedProducts = selectedIds
     .map((id) => allProducts.find((product) => product.id === id))
     .filter(Boolean);
 
   if (!selectedProducts.length) {
-    renderChat("Please select at least one product first, then press Generate Routine.");
+    errors.set(chat.id, "Please select at least one product first, then press Generate Routine.");
+    renderChat();
     return;
   }
 
@@ -402,24 +583,32 @@ generateBtn.addEventListener("click", () => {
     }),
   );
 
-  messages.push({
+  chat.messages.push({
     role: "user",
     content: `Build me a personalized routine using these selected products:\n${JSON.stringify(productData, null, 2)}`,
     display: `Build me a routine with: ${selectedProducts.map((p) => p.name).join(", ")}`,
   });
-  askAI();
+
+  // Name the tab after the routine
+  if (chat.title === DEFAULT_TITLE) {
+    const more = selectedProducts.length > 1 ? ` +${selectedProducts.length - 1}` : "";
+    chat.title = makeTitle(`Routine: ${selectedProducts[0].name}${more}`);
+  }
+  askAI(chat);
 });
 
 /* Follow-up questions in the chat box */
 chatForm.addEventListener("submit", (e) => {
   e.preventDefault();
 
+  const chat = getActiveChat();
   const text = userInput.value.trim();
-  if (!text || waiting) return;
+  if (!text || pending.has(chat.id)) return;
 
-  messages.push({ role: "user", content: text });
+  chat.messages.push({ role: "user", content: text });
+  if (chat.title === DEFAULT_TITLE) chat.title = makeTitle(text);
   userInput.value = "";
-  askAI();
+  askAI(chat);
 });
 
 /* ---------- Soft sheen that follows the cursor ---------- */
@@ -466,7 +655,8 @@ async function init() {
   setDirection(savedDir);
 
   loadSelected();
-  renderChat();
+  loadChats();
+  renderAll();
 
   try {
     allProducts = await loadProducts();
