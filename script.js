@@ -30,8 +30,10 @@ Do not invent products, prices or claims. Reply in the language the user writes 
 let allProducts = []; // every product from products.json
 let selectedIds = []; // ids of the products the user picked (saved in localStorage)
 const openDetails = new Set(); // ids whose description is currently shown
+let shownChips = new Set(); // ids already drawn in the Selected Products list
 let messages = []; // the conversation: { role, content, display? } (no system prompt)
 let waiting = false; // true while a reply is on its way
+let shownMessages = 0; // how many messages are already drawn (so only new ones animate)
 
 const SELECTED_KEY = "routineSelectedIds";
 const DIR_KEY = "routineDirection";
@@ -74,7 +76,7 @@ function escapeHtml(text) {
 }
 
 /* Create HTML for displaying product cards */
-function displayProducts(products) {
+function displayProducts(products, animate = true) {
   if (!products.length) {
     productsContainer.innerHTML = `
       <div class="placeholder-message">No products match your search</div>
@@ -83,11 +85,13 @@ function displayProducts(products) {
   }
 
   productsContainer.innerHTML = products
-    .map((product) => {
+    .map((product, index) => {
       const isSelected = selectedIds.includes(product.id);
       const isOpen = openDetails.has(product.id);
+      // "enter" plays a small fade-in. --i staggers the cards one after another.
       return `
-    <article class="product-card${isSelected ? " selected" : ""}" data-id="${product.id}">
+    <article class="product-card sheen${isSelected ? " selected" : ""}${animate ? " enter" : ""}"
+      data-id="${product.id}" style="--i:${Math.min(index, 12)}">
       <!-- Clicking this part selects or unselects the product -->
       <button type="button" class="card-select" aria-pressed="${isSelected}">
         <img src="${escapeHtml(product.image)}" alt="" loading="lazy">
@@ -106,9 +110,13 @@ function displayProducts(products) {
       >
         ${isOpen ? "Hide details" : "Details"}
       </button>
-      <p class="product-description" id="desc-${product.id}" ${isOpen ? "" : "hidden"}>
-        ${escapeHtml(product.description)}
-      </p>
+      <div class="desc-wrap${isOpen ? " open" : ""}">
+        <div class="desc-inner">
+          <p class="product-description" id="desc-${product.id}">
+            ${escapeHtml(product.description)}
+          </p>
+        </div>
+      </div>
     </article>
   `;
     })
@@ -116,7 +124,7 @@ function displayProducts(products) {
 }
 
 /* Show only the products that match BOTH the category and the search box */
-function applyFilters() {
+function applyFilters(animate = true) {
   const category = categoryFilter.value;
   // Split the search into words. A product must contain every word.
   const words = productSearch.value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -130,7 +138,7 @@ function applyFilters() {
     return words.every((word) => text.includes(word));
   });
 
-  displayProducts(filtered);
+  displayProducts(filtered, animate);
 }
 
 /* ---------- Selecting products ---------- */
@@ -176,7 +184,7 @@ function updateSelectionView() {
     selectedProductsList.innerHTML = selectedProducts
       .map(
         (product) => `
-      <span class="selected-chip">
+      <span class="selected-chip${shownChips.has(product.id) ? "" : " pop"}">
         <span class="chip-text">${escapeHtml(product.name)}
           <small>${escapeHtml(product.brand)}</small></span>
         <button type="button" class="chip-remove" data-id="${product.id}"
@@ -187,6 +195,8 @@ function updateSelectionView() {
       .join("");
   }
 
+  // Remember which chips are on screen so only newly added ones animate
+  shownChips = new Set(selectedProducts.map((product) => product.id));
   clearAllBtn.hidden = !selectedProducts.length;
 }
 
@@ -205,7 +215,7 @@ productsContainer.addEventListener("click", (e) => {
     const toggle = card.querySelector(".details-toggle");
     toggle.setAttribute("aria-expanded", nowOpen);
     toggle.textContent = nowOpen ? "Hide details" : "Details";
-    card.querySelector(".product-description").hidden = !nowOpen;
+    card.querySelector(".desc-wrap").classList.toggle("open", nowOpen);
   } else if (e.target.closest(".card-select")) {
     toggleProduct(id);
   }
@@ -214,19 +224,23 @@ productsContainer.addEventListener("click", (e) => {
 /* Remove one product from the Selected Products list */
 selectedProductsList.addEventListener("click", (e) => {
   const remove = e.target.closest(".chip-remove");
-  if (remove) toggleProduct(Number(remove.dataset.id));
+  if (!remove) return;
+  // Shrink the chip first, then remove it
+  remove.closest(".selected-chip").classList.add("leaving");
+  setTimeout(() => toggleProduct(Number(remove.dataset.id)), 160);
 });
 
 clearAllBtn.addEventListener("click", clearSelection);
-categoryFilter.addEventListener("change", applyFilters);
-productSearch.addEventListener("input", applyFilters); // filters as you type
+categoryFilter.addEventListener("change", () => applyFilters(true));
+// Filters as you type. No entrance animation here, so typing does not flicker.
+productSearch.addEventListener("input", () => applyFilters(false));
 
 /* ---------- Chat ---------- */
 
 /* Add a message bubble to the chat window and return it */
-function addMessage(text, who) {
+function addMessage(text, who, animate = false) {
   const bubble = document.createElement("div");
-  bubble.className = `msg ${who}`;
+  bubble.className = `msg ${who}${animate ? " pop" : ""}`;
   bubble.dir = "auto"; // each message follows its own language direction
   bubble.textContent = text;
   chatWindow.appendChild(bubble);
@@ -300,24 +314,34 @@ function renderChat(errorText) {
     "ai",
   );
 
-  for (const message of messages) {
+  messages.forEach((message, index) => {
+    // Only messages added since the last draw slide in
+    const isNew = index >= shownMessages;
     if (message.role === "user") {
       // Show the short version, not the product data we send to the AI
-      addMessage(message.display || message.content, "user");
+      addMessage(message.display || message.content, "user", isNew);
     } else {
       // Bot replies may contain markdown, so format them
-      addMessage("", "ai").innerHTML = renderMarkdown(message.content);
+      addMessage("", "ai", isNew).innerHTML = renderMarkdown(message.content);
     }
-  }
+  });
+  shownMessages = messages.length;
 
-  if (waiting) addMessage("Thinking…", "ai").classList.add("thinking");
-  if (errorText) addMessage(errorText, "ai");
+  if (waiting) {
+    // Three bouncing dots while a reply is on its way
+    const thinking = addMessage("", "ai", true);
+    thinking.classList.add("thinking");
+    thinking.innerHTML =
+      '<span class="visually-hidden">Thinking</span><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+  }
+  if (errorText) addMessage(errorText, "ai", true);
   chatWindow.scrollTop = chatWindow.scrollHeight;
 
   // Lock the controls only while a reply is on its way
   userInput.disabled = waiting;
   sendBtn.disabled = waiting;
   generateBtn.disabled = waiting;
+  generateBtn.classList.toggle("busy", waiting);
 }
 
 /* Send the whole conversation to the Worker and show the reply */
@@ -396,6 +420,19 @@ chatForm.addEventListener("submit", (e) => {
   messages.push({ role: "user", content: text });
   userInput.value = "";
   askAI();
+});
+
+/* ---------- Soft sheen that follows the cursor ---------- */
+
+/* Any element with the "sheen" class gets --mx and --my set to the pointer
+   position inside it. The CSS uses them to place a glint under the cursor. */
+document.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "touch") return;
+  const el = e.target.closest?.(".sheen");
+  if (!el) return;
+  const box = el.getBoundingClientRect();
+  el.style.setProperty("--mx", `${e.clientX - box.left}px`);
+  el.style.setProperty("--my", `${e.clientY - box.top}px`);
 });
 
 /* ---------- Right-to-left (RTL) support ---------- */
